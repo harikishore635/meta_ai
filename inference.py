@@ -241,12 +241,10 @@ def main() -> None:
 
     tasks = list(TASK_ORDER) if args.task == "all" else [args.task]
 
-    client: OpenAI | None = None
-    if API_KEY:
-        try:
-            client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-        except Exception:
-            client = None
+    if "API_KEY" in os.environ and "API_BASE_URL" in os.environ:
+        client = OpenAI(base_url=os.environ["API_BASE_URL"], api_key=os.environ["API_KEY"])
+    else:
+        client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY) if API_KEY else None
 
     log(
         "START",
