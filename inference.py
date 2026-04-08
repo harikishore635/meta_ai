@@ -253,24 +253,26 @@ def main() -> None:
     tasks = list(TASK_ORDER) if args.task == "all" else [args.task]
     model = args.model or MODEL_NAME
 
-    # Scaler grader always injects API_BASE_URL and API_KEY — use os.environ[] as required
+    # Scaler grader injects API_BASE_URL and API_KEY — use os.environ[] as required.
+    # Wrap in broad try/except so a bad URL/key never crashes the whole script.
     client: Optional[OpenAI] = None
     try:
         client = OpenAI(
             base_url=os.environ["API_BASE_URL"],
             api_key=os.environ["API_KEY"],
         )
-    except KeyError:
-        # Not running under Scaler grader — fall back to local env vars for testing
+    except Exception as exc:
+        # Fall back to local env vars (for testing) or heuristic mode
+        print(f"[WARN] Primary client init failed ({exc}). Trying fallback.", flush=True)
         _key  = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or ""
         _base = os.getenv("API_BASE_URL", API_BASE_URL)
-        if _key:
+        if _key and _base:
             try:
                 client = OpenAI(base_url=_base, api_key=_key)
-            except Exception as exc:
-                print(f"[WARN] Could not create OpenAI client: {exc}. Using heuristic mode.", flush=True)
+            except Exception as exc2:
+                print(f"[WARN] Fallback client also failed ({exc2}). Heuristic mode.", flush=True)
         else:
-            print("[WARN] No API key found. Using heuristic mode.", flush=True)
+            print("[WARN] No usable API credentials. Using heuristic mode.", flush=True)
 
     for task_id in tasks:
         run_episode(task_id=task_id, seed=args.seed, client=client, model=model)
