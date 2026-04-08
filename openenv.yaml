@@ -1,0 +1,30 @@
+name: antibiotic-stewardship-env
+version: 0.1.0
+description: RL environment for evaluating anti-microbial resistance and coupled patient-population dynamics
+author: "submission-author"
+
+environment:
+  observation_type: WardObservation
+  action_type: PrescriptionAction
+  reset_endpoint: /reset
+  step_endpoint: /step
+  state_endpoint: /state
+
+tasks:
+  - id: easy
+    name: Single Patient Pathogen Match
+    difficulty: easy
+    grader: SinglePatientGrader
+  - id: medium
+    name: Ward Management Outbreak
+    difficulty: medium
+    grader: WardManagementGrader
+  - id: hard
+    name: Strict MDR Reserve Control
+    difficulty: hard
+    grader: ReserveBudgetGrader
+
+server:
+  port: 8000
+  framework: fastapi
+  transport: http
