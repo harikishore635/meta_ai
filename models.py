@@ -23,6 +23,10 @@ class WardObservation(BaseModel):
     ward_cipro_resistance: float = Field(..., ge=0.0, le=1.0)
     ward_mero_resistance: float = Field(..., ge=0.0, le=1.0)
     
+    population_resistance_index: float
+    meropenem_cumulative_patient_days: int
+    meropenem_patient_day_budget: int
+
     total_patients_cured: int
     total_patient_deaths: int
     budget_remaining: float
