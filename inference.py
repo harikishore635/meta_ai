@@ -23,7 +23,7 @@ MODEL_NAME = os.getenv("MODEL_NAME", "<your-active-model>")
 HF_TOKEN = os.getenv("HF_TOKEN")
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 
-ENV_URL = os.getenv("ENV_URL", "http://127.0.0.1:8000")
+ENV_URL = os.getenv("ENV_URL", "http://127.0.0.1:7860")
 BASELINE_SEED = int(os.getenv("BASELINE_SEED", "42"))
 
 TASK_ORDER = ("easy", "medium", "hard")
