@@ -1,3 +1,9 @@
+import os
+import sys
+
+# Ensure root directory is reliably in path for Docker imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 from fastapi import FastAPI, HTTPException
