@@ -253,13 +253,24 @@ def main() -> None:
     tasks = list(TASK_ORDER) if args.task == "all" else [args.task]
     model = args.model or MODEL_NAME
 
-    # Safely build OpenAI client — fall back to heuristic if no key
+    # Scaler grader always injects API_BASE_URL and API_KEY — use os.environ[] as required
     client: Optional[OpenAI] = None
-    if API_KEY:
-        try:
-            client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-        except Exception as exc:
-            print(f"[WARN] Could not create OpenAI client: {exc}. Using heuristic mode.", flush=True)
+    try:
+        client = OpenAI(
+            base_url=os.environ["API_BASE_URL"],
+            api_key=os.environ["API_KEY"],
+        )
+    except KeyError:
+        # Not running under Scaler grader — fall back to local env vars for testing
+        _key  = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or ""
+        _base = os.getenv("API_BASE_URL", API_BASE_URL)
+        if _key:
+            try:
+                client = OpenAI(base_url=_base, api_key=_key)
+            except Exception as exc:
+                print(f"[WARN] Could not create OpenAI client: {exc}. Using heuristic mode.", flush=True)
+        else:
+            print("[WARN] No API key found. Using heuristic mode.", flush=True)
 
     for task_id in tasks:
         run_episode(task_id=task_id, seed=args.seed, client=client, model=model)
