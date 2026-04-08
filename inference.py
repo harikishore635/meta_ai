@@ -14,11 +14,15 @@ from typing import Any
 import requests
 from openai import OpenAI
 
-from meta_ai import ReserveBudgetGrader, SinglePatientGrader, WardManagementGrader
+from graders.hard_grader import ReserveBudgetGrader
+from graders.easy_grader import SinglePatientGrader
+from graders.medium_grader import WardManagementGrader
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or ""
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
+HF_TOKEN = os.getenv("HF_TOKEN")
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
+
 ENV_URL = os.getenv("ENV_URL", "http://127.0.0.1:8000")
 BASELINE_SEED = int(os.getenv("BASELINE_SEED", "42"))
 
@@ -238,8 +242,8 @@ def main() -> None:
     tasks = list(TASK_ORDER) if args.task == "all" else [args.task]
 
     client: OpenAI | None = None
-    if API_KEY:
-        client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+    if HF_TOKEN:
+        client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
     log(
         "START",

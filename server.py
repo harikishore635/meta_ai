@@ -22,7 +22,8 @@ app.add_middleware(
 def health(): return {"status": "ok"}
 
 @app.post("/reset", response_model=ResetResult)
-def reset_env(req: ResetRequest):
+def reset_env(req: ResetRequest | None = None):
+    req = req or ResetRequest()
     return env_instance.reset(task_id=req.task_id, seed=req.seed)
 
 @app.post("/step", response_model=StepResult)
