@@ -15,4 +15,5 @@ class ReserveBudgetGrader:
         reserve = 0.75 * mero
         budget_pen = 0.04 * over
         score = clinical - reserve - budget_pen
-        return max(0.0, min(1.0, float(score)))
+        # Strictly between 0 and 1 (exclusive) as required by Scaler grader
+        return max(0.001, min(0.999, float(score)))

@@ -274,7 +274,7 @@ def run_episode(task_id: str, seed: int, client: Optional[OpenAI], model: str) -
             pass
 
         score   = float(GRADERS[task_id].score(last_info))
-        score   = min(max(score, 0.0), 1.0)
+        score   = max(0.001, min(0.999, score))  # strictly between 0 and 1
         success = score >= 0.5
 
     except Exception as exc:

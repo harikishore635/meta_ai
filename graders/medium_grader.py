@@ -10,4 +10,5 @@ class WardManagementGrader:
         clinical = (cured / n) - 0.55 * (deaths / n)
         amr_term = 0.55 * pop
         score = clinical - amr_term
-        return max(0.0, min(1.0, float(score)))
+        # Strictly between 0 and 1 (exclusive) as required by Scaler grader
+        return max(0.001, min(0.999, float(score)))
