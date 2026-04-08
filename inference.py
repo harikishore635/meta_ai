@@ -243,7 +243,10 @@ def main() -> None:
 
     client: OpenAI | None = None
     if HF_TOKEN:
-        client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
+        try:
+            client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
+        except Exception:
+            client = None
 
     log(
         "START",
