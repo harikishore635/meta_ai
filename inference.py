@@ -20,7 +20,7 @@ from graders.medium_grader import WardManagementGrader
 
 API_BASE_URL = os.getenv("API_BASE_URL", "<your-active-server>")
 MODEL_NAME = os.getenv("MODEL_NAME", "<your-active-model>")
-HF_TOKEN = os.getenv("HF_TOKEN")
+API_KEY = os.getenv("API_KEY") or os.getenv("HF_TOKEN")
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 
 ENV_URL = os.getenv("ENV_URL", "http://127.0.0.1:7860")
@@ -242,9 +242,9 @@ def main() -> None:
     tasks = list(TASK_ORDER) if args.task == "all" else [args.task]
 
     client: OpenAI | None = None
-    if HF_TOKEN:
+    if API_KEY:
         try:
-            client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
+            client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
         except Exception:
             client = None
 
