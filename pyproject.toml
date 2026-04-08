@@ -15,3 +15,10 @@ dependencies = [
     "openai==1.33.0",
     "requests>=2.31.0"
 ]
+
+[project.scripts]
+server = "server.app:main"
+
+[tool.setuptools]
+include-package-data = true
+packages = ["server"]
