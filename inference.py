@@ -1,14 +1,13 @@
 """
 Inference Script — Antibiotic Stewardship OpenEnv
 ===================================================
-MANDATORY env vars (set by Scaler grader):
-    API_BASE_URL      LLM endpoint
-    MODEL_NAME        Model identifier
-    HF_TOKEN          Hugging Face / API key  (also checks API_KEY)
-    LOCAL_IMAGE_NAME  Docker image name (not used — we use HTTP ENV_URL)
-    ENV_URL           URL of the running environment server
+MANDATORY env vars (injected by Scaler grader):
+    API_BASE_URL   LLM proxy endpoint
+    API_KEY        API key for the LLM proxy
+    MODEL_NAME     Model identifier
+    ENV_URL        URL of the running environment server
 
-STDOUT FORMAT (parsed by Scaler grader):
+STDOUT FORMAT (parsed by Scaler grader — do not change):
     [START] task=<task> env=<benchmark> model=<model>
     [STEP]  step=<n> action=<str> reward=<0.00> done=<true|false> error=<msg|null>
     [END]   success=<true|false> steps=<n> score=<0.000> rewards=<r1,r2,...>
@@ -24,17 +23,15 @@ from typing import Any, List, Optional
 import requests
 from openai import OpenAI
 
-# ── Environment variables ──────────────────────────────────────────────────────
-API_BASE_URL   = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
-MODEL_NAME     = os.getenv("MODEL_NAME")   or "Qwen/Qwen2.5-72B-Instruct"
-API_KEY        = os.getenv("HF_TOKEN")     or os.getenv("API_KEY") or ""
-LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
+# ── LLM configuration — Scaler grader injects these ──────────────────────────
+API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
+MODEL_NAME   = os.getenv("MODEL_NAME")   or "Qwen/Qwen2.5-72B-Instruct"
 
-ENV_URL        = os.getenv("ENV_URL", "http://127.0.0.1:7860")
-BASELINE_SEED  = int(os.getenv("BASELINE_SEED", "42"))
-BENCHMARK      = "antibiotic-stewardship"
-
-TASK_ORDER = ("easy", "medium", "hard")
+# ── Environment configuration ─────────────────────────────────────────────────
+ENV_URL       = os.getenv("ENV_URL", "http://127.0.0.1:7860")
+BASELINE_SEED = int(os.getenv("BASELINE_SEED", "42"))
+BENCHMARK     = "antibiotic-stewardship"
+TASK_ORDER    = ("easy", "medium", "hard")
 
 # ── Mandatory stdout helpers ───────────────────────────────────────────────────
 def log_start(task: str, model: str) -> None:
@@ -56,7 +53,63 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
         flush=True,
     )
 
-# ── Heuristic agent (runs without LLM) ────────────────────────────────────────
+
+# ── LLM call — always routes through Scaler's injected API_BASE_URL ───────────
+def call_llm(client: Optional[OpenAI], model: str, system: str, user: str) -> str:
+    """
+    Call LLM through the grader-injected proxy.
+    Primary: OpenAI client (as required by Scaler).
+    Fallback: direct requests to the same API_BASE_URL (still goes through proxy).
+    """
+    api_base = os.environ["API_BASE_URL"]
+    api_key  = os.environ["API_KEY"]
+
+    # Primary: use OpenAI client (required by Scaler)
+    if client is not None:
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user",   "content": user},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.1,
+                max_tokens=256,
+            )
+            return resp.choices[0].message.content or "{}"
+        except Exception as exc:
+            print(f"[DEBUG] OpenAI client call failed: {exc}", flush=True)
+
+    # Fallback: direct HTTP to the same proxy endpoint (still counts as proxy usage)
+    try:
+        url = api_base.rstrip("/") + "/chat/completions"
+        r = requests.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user",   "content": user},
+                ],
+                "response_format": {"type": "json_object"},
+                "temperature": 0.1,
+                "max_tokens": 256,
+            },
+            timeout=60,
+        )
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"] or "{}"
+    except Exception as exc:
+        print(f"[DEBUG] Direct HTTP LLM call failed: {exc}", flush=True)
+        return "{}"
+
+
+# ── Heuristic agent (backup if LLM completely fails) ─────────────────────────
 def heuristic_action(obs: dict[str, Any]) -> dict[str, Any]:
     patients = [
         p for p in (obs.get("patients") or [])
@@ -100,52 +153,38 @@ def heuristic_action(obs: dict[str, Any]) -> dict[str, Any]:
     return {"patient_id": pid, "drug_choice": drug, "duration_days": max(1, min(14, int(duration)))}
 
 
-# ── LLM agent ─────────────────────────────────────────────────────────────────
+# ── Prompt builder ─────────────────────────────────────────────────────────────
 def obs_to_prompt(obs: dict[str, Any]) -> str:
     patients = obs.get("patients") or []
     lines = [
         f"step={obs.get('step_count')}/{obs.get('max_steps')}",
-        f"ward_res amox={obs.get('ward_amox_resistance'):.3f} cipro={obs.get('ward_cipro_resistance'):.3f} mero={obs.get('ward_mero_resistance'):.3f}",
-        f"population_resistance_index={obs.get('population_resistance_index', 0):.3f}",
-        f"meropenem_cumulative_patient_days={obs.get('meropenem_cumulative_patient_days', 0)} budget={obs.get('meropenem_patient_day_budget', 0)}",
+        f"ward_res amox={obs.get('ward_amox_resistance', 0):.3f} "
+        f"cipro={obs.get('ward_cipro_resistance', 0):.3f} "
+        f"mero={obs.get('ward_mero_resistance', 0):.3f}",
+        f"meropenem_days_used={obs.get('meropenem_cumulative_patient_days', 0)} "
+        f"budget={obs.get('meropenem_patient_day_budget', 0)}",
         "patients:",
     ]
     for p in patients:
         if p.get("infection_cleared") or p.get("severity_score", 0) >= 10.0:
             continue
         lines.append(
-            f"  - id={p['patient_id']} sev={p['severity_score']:.2f} "
+            f"  id={p['patient_id']} sev={p['severity_score']:.2f} "
             f"res_amox={p['res_amox']:.2f} res_cipro={p['res_cipro']:.2f} res_mero={p['res_mero']:.2f}"
         )
-    lines.append('Respond with JSON only: {"patient_id":"<id>","drug_choice":"none|amoxicillin|ciprofloxacin|meropenem","duration_days":<1-14 int>}')
+    lines.append(
+        'Choose one action. Return JSON only: '
+        '{"patient_id":"<id>","drug_choice":"none|amoxicillin|ciprofloxacin|meropenem","duration_days":<1-14>}'
+    )
     return "\n".join(lines)
 
 
-def llm_action(client: OpenAI, model: str, obs: dict[str, Any]) -> dict[str, Any]:
-    try:
-        completion = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": (
-                    "You are a hospital antimicrobial stewardship assistant. "
-                    "Minimize reserve-antibiotic pressure while clearing infections. "
-                    "Output JSON only."
-                )},
-                {"role": "user", "content": obs_to_prompt(obs)},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.1,
-        )
-        raw  = completion.choices[0].message.content or "{}"
-        data = json.loads(raw)
-        return {
-            "patient_id":   str(data.get("patient_id", "P0")),
-            "drug_choice":  str(data.get("drug_choice", "none")),
-            "duration_days": int(data.get("duration_days", 5)),
-        }
-    except Exception as exc:
-        print(f"[DEBUG] LLM call failed: {exc}", flush=True)
-        return heuristic_action(obs)
+SYSTEM_PROMPT = (
+    "You are a hospital antimicrobial stewardship expert. "
+    "Treat infected patients effectively while minimizing antibiotic resistance. "
+    "Prefer narrow-spectrum antibiotics. Use meropenem only for severe cases when others fail. "
+    "Return JSON only."
+)
 
 
 # ── Graders ────────────────────────────────────────────────────────────────────
@@ -161,12 +200,7 @@ GRADERS = {
 
 
 # ── Episode runner ─────────────────────────────────────────────────────────────
-def run_episode(
-    task_id: str,
-    seed: int,
-    client: Optional[OpenAI],
-    model: str,
-) -> None:
+def run_episode(task_id: str, seed: int, client: Optional[OpenAI], model: str) -> None:
     rewards: List[float] = []
     steps_taken = 0
     score = 0.0
@@ -175,13 +209,16 @@ def run_episode(
     log_start(task=task_id, model=model)
 
     try:
-        r = requests.post(f"{ENV_URL}/reset", json={"task_id": task_id, "seed": seed}, timeout=60)
+        r = requests.post(
+            f"{ENV_URL}/reset",
+            json={"task_id": task_id, "seed": seed},
+            timeout=60,
+        )
         r.raise_for_status()
-        obs       = r.json()["observation"]
+        obs = r.json()["observation"]
         last_info: dict[str, Any] = {}
 
         for step_num in range(1, 200):
-            # Check if any treatable patients remain
             sick = [
                 p for p in (obs.get("patients") or [])
                 if not p.get("infection_cleared") and float(p.get("severity_score", 0)) < 10.0
@@ -189,7 +226,19 @@ def run_episode(
             if not sick:
                 break
 
-            action = llm_action(client, model, obs) if client else heuristic_action(obs)
+            # Always try LLM first (goes through grader's proxy)
+            action = heuristic_action(obs)  # default
+            try:
+                raw = call_llm(client, model, SYSTEM_PROMPT, obs_to_prompt(obs))
+                data = json.loads(raw)
+                if data.get("patient_id") and data.get("drug_choice"):
+                    action = {
+                        "patient_id":    str(data["patient_id"]),
+                        "drug_choice":   str(data["drug_choice"]),
+                        "duration_days": int(data.get("duration_days", 5)),
+                    }
+            except Exception as exc:
+                print(f"[DEBUG] LLM parse error: {exc}", flush=True)
 
             error_msg: Optional[str] = None
             try:
@@ -207,7 +256,6 @@ def run_episode(
 
             rewards.append(reward)
             steps_taken = step_num
-
             action_str = (
                 f"{action.get('patient_id','?')}:"
                 f"{action.get('drug_choice','none')}:"
@@ -218,7 +266,6 @@ def run_episode(
             if done:
                 break
 
-        # Get final grader score
         try:
             st = requests.get(f"{ENV_URL}/state", timeout=30).json()
             if isinstance(st, dict) and "cured" in st:
@@ -240,12 +287,7 @@ def run_episode(
 # ── Entry point ────────────────────────────────────────────────────────────────
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--task",
-        choices=[*TASK_ORDER, "all"],
-        default="all",
-        help="Which task to run (default: all).",
-    )
+    parser.add_argument("--task", choices=[*TASK_ORDER, "all"], default="all")
     parser.add_argument("--model", default=MODEL_NAME)
     parser.add_argument("--seed",  type=int, default=BASELINE_SEED)
     args = parser.parse_args()
@@ -253,25 +295,22 @@ def main() -> None:
     tasks = list(TASK_ORDER) if args.task == "all" else [args.task]
     model = args.model or MODEL_NAME
 
-    # Scaler grader injects API_BASE_URL and API_KEY — use os.environ[] exactly as required
+    # Initialize OpenAI client exactly as Scaler requires:
+    # base_url=os.environ["API_BASE_URL"], api_key=os.environ["API_KEY"]
     client: Optional[OpenAI] = None
     try:
         client = OpenAI(
             base_url=os.environ["API_BASE_URL"],
             api_key=os.environ["API_KEY"],
         )
-    except BaseException as exc:
-        print(f"[WARN] OpenAI client init failed ({type(exc).__name__}: {exc}). Heuristic mode.", flush=True)
-        client = None
+        print(f"[INFO] OpenAI client ready: {os.environ['API_BASE_URL']}", flush=True)
+    except Exception as exc:
+        # Client init failed — LLM calls will still go through proxy via direct requests
+        print(f"[WARN] OpenAI client init failed ({exc}). Will call proxy via requests.", flush=True)
 
     for task_id in tasks:
         run_episode(task_id=task_id, seed=args.seed, client=client, model=model)
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except BaseException as exc:
-        # Ensure we NEVER exit with a non-zero unhandled exception
-        print(f"[FATAL] {type(exc).__name__}: {exc}", flush=True)
-        sys.exit(0)
+    main()
