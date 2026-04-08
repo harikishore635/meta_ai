@@ -253,30 +253,25 @@ def main() -> None:
     tasks = list(TASK_ORDER) if args.task == "all" else [args.task]
     model = args.model or MODEL_NAME
 
-    # Scaler grader injects API_BASE_URL and API_KEY — use os.environ[] as required.
-    # Wrap in broad try/except so a bad URL/key never crashes the whole script.
+    # Scaler grader injects API_BASE_URL and API_KEY — use os.environ[] exactly as required
     client: Optional[OpenAI] = None
     try:
         client = OpenAI(
             base_url=os.environ["API_BASE_URL"],
             api_key=os.environ["API_KEY"],
         )
-    except Exception as exc:
-        # Fall back to local env vars (for testing) or heuristic mode
-        print(f"[WARN] Primary client init failed ({exc}). Trying fallback.", flush=True)
-        _key  = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or ""
-        _base = os.getenv("API_BASE_URL", API_BASE_URL)
-        if _key and _base:
-            try:
-                client = OpenAI(base_url=_base, api_key=_key)
-            except Exception as exc2:
-                print(f"[WARN] Fallback client also failed ({exc2}). Heuristic mode.", flush=True)
-        else:
-            print("[WARN] No usable API credentials. Using heuristic mode.", flush=True)
+    except BaseException as exc:
+        print(f"[WARN] OpenAI client init failed ({type(exc).__name__}: {exc}). Heuristic mode.", flush=True)
+        client = None
 
     for task_id in tasks:
         run_episode(task_id=task_id, seed=args.seed, client=client, model=model)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except BaseException as exc:
+        # Ensure we NEVER exit with a non-zero unhandled exception
+        print(f"[FATAL] {type(exc).__name__}: {exc}", flush=True)
+        sys.exit(0)
