@@ -241,10 +241,23 @@ def main() -> None:
 
     tasks = list(TASK_ORDER) if args.task == "all" else [args.task]
 
-    if "API_KEY" in os.environ and "API_BASE_URL" in os.environ:
-        client = OpenAI(base_url=os.environ["API_BASE_URL"], api_key=os.environ["API_KEY"])
-    else:
-        client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY) if API_KEY else None
+    # Safely build the OpenAI client — fall back to heuristic mode if no key is available
+    _api_key = (
+        os.getenv("API_KEY")
+        or os.getenv("HF_TOKEN")
+        or os.getenv("OPENAI_API_KEY")
+        or ""
+    )
+    _api_base = os.getenv("API_BASE_URL", API_BASE_URL)
+    _model = args.model or MODEL_NAME
+
+    client = None
+    if _api_key and _api_base:
+        try:
+            client = OpenAI(base_url=_api_base, api_key=_api_key)
+        except Exception as exc:
+            print(f"[WARN] Could not create OpenAI client: {exc}. Running in heuristic mode.")
+            client = None
 
     log(
         "START",
