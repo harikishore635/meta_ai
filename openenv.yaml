@@ -1,7 +1,7 @@
 name: antibiotic-stewardship-env
 version: 0.1.0
 description: RL environment for evaluating anti-microbial resistance and coupled patient-population dynamics
-author: "submission-author"
+author: "Hari Kishore"
 
 environment:
   observation_type: WardObservation
